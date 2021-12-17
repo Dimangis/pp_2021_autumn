@@ -52,7 +52,11 @@ class Tensor {
      }
 
      T* get_data() const {
-         return data.get()->data();
+         if (data) {
+            return data.get()->data();
+         } else {
+             return nullptr;
+         }
      }
      size_t get_size() const {
          return size;

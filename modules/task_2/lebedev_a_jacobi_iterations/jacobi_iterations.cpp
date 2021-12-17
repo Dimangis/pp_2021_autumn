@@ -9,7 +9,6 @@
 #include <cstring>
 
 
-
 #if SIZE_MAX == UCHAR_MAX
     #define my_MPI_SIZE_T MPI_UNSIGNED_CHAR
 #elif SIZE_MAX == USHRT_MAX
@@ -87,6 +86,11 @@ Tensor<float> solve_parallel(const LinearSystem& sys, const float accuracy) {
         return Tensor<float>();
     }
 
+    std::vector<int> tmp(5);
+    if (rank == 0) {
+        tmp = {1,2,3,4,5};
+    }
+
     size_t d1, d2;
     if (rank == 0) {
         d2 = sys.n_dims;
@@ -107,12 +111,12 @@ Tensor<float> solve_parallel(const LinearSystem& sys, const float accuracy) {
     MPI_Bcast(x.get_data(), x.get_size(), MPI_FLOAT, 0, NEW_WORLD);
 
     int diag = 0;
-    std::vector<int> recvcounts(0);
-    std::vector<int> displs(0);
+    std::vector<int> recvcounts(size);
+    std::vector<int> displs(size);
 
     if (rank == 0) {
-        recvcounts.resize(size);
-        displs.resize(size);
+        //recvcounts.resize(size);
+        //displs.resize(size);
 
         size_t row_per_process = sys.n_dims / size;
         int last_rows = sys.n_dims % size;
@@ -152,6 +156,10 @@ Tensor<float> solve_parallel(const LinearSystem& sys, const float accuracy) {
         MPI_Recv(&diag, 1, my_MPI_SIZE_T, 0, 3, NEW_WORLD, &status);
     }
 
+    std::cout << "AAAA" << std::endl;
+    MPI_Barrier(NEW_WORLD);
+    std::cout << "BBBB" << std::endl;
+
     size_t stride1 = B_local.get_strides()[0], stride2 = B_local.get_strides()[1];
     // normalize A -> B, b -> d
     for (size_t i = 0; i < d1; i++) {
@@ -171,29 +179,24 @@ Tensor<float> solve_parallel(const LinearSystem& sys, const float accuracy) {
     uint8_t solved = 0;
     while (!solved) {
         Tensor<float> x_local = matmul2D(B_local, x) + d_local;
-        MPI_Gatherv(x_local.get_data(), x_local.get_size(), MPI_FLOAT,
+        /*if (rank == 0) {
+            for (auto i : recvcounts)
+                std::cout << i << " ";
+            std::cout << std::endl;
+            for (auto i : displs)
+                std::cout << i << " ";
+            std::cout << std::endl;
+        }*/
+        MPI_Gatherv(x_local.get_data(), int(x_local.get_size()), MPI_FLOAT,
                     x_tmp.get_data(), recvcounts.data(), displs.data(),
                     MPI_FLOAT, 0, NEW_WORLD);
         if (rank == 0) {
-            /*Tensor<float> new_x(x.get_shape());
-            std::memcpy(new_x.get_data(), x_local.get_data(), x_local.get_size() * sizeof(float));
-            size_t offset = x_local.get_size();
-            int count;
-            for (int i = 1; i < size; i++) {
-                MPI_Status status;
-                MPI_Probe(i, 0, NEW_WORLD, &status);
-                MPI_Get_count(&status, MPI_FLOAT, &count);
-                MPI_Recv(new_x.get_data() + offset, count, MPI_FLOAT, i, 0, NEW_WORLD, &status);
-                offset += count;
-            }*/
             float diff = dist(x_tmp, x);
             if (diff <= accuracy) {
                 solved = 1;
             }
-            x = x_tmp;
-        } //else {
-            //MPI_Send(x_local.get_data(), x_local.get_size(), MPI_FLOAT, 0, 0, NEW_WORLD);
-        //}
+            std::memcpy(x.get_data(), x_tmp.get_data(), x_tmp.get_size() * sizeof(float));
+        }
         MPI_Barrier(NEW_WORLD);
         MPI_Bcast(&solved, 1, MPI_UNSIGNED_CHAR, 0, NEW_WORLD);
         MPI_Bcast(x.get_data(), x.get_size(), MPI_FLOAT, 0, NEW_WORLD);
